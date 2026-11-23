@@ -724,6 +724,27 @@ static inline uint8 PpuMosaicAt(Ppu *ppu, int i) {
   return ppu->mosaicModulo[(unsigned)i < (unsigned)kPpuXPixels ? i : (i < 0 ? 0 : kPpuXPixels - 1)];
 }
 
+/* Width of the mosaic cell that starts at screen column `sx`.
+ *
+ * Normally derived from mosaicModulo, which PpuPrepareMosaic rebuilds whenever
+ * PPU_mosaicSize changes. An HDMA write to $2106 lands mid-line, though, so the
+ * table can still describe a *larger* cell than the register now asks for -- FF6
+ * does exactly that in the Narshe mines, writing $2106 = 0 (size 1) on every
+ * scanline over a table built for a bigger size. The subtraction then goes
+ * negative, and the 4bpp/mode-7 mosaic draw loops use `while (++i != w)`, which
+ * never terminates for w <= 0 and walks the zbuffer pointer backwards until it
+ * faults. Clamp to a single pixel in that case. */
+static inline int PpuMosaicRunLength(Ppu *ppu, int sx, int mosaic_size) {
+  int w = mosaic_size - (sx - PpuMosaicAt(ppu, sx));
+  if (w > 0)
+    return w;
+  static unsigned s_stale_runs;
+  if (s_stale_runs++ < 8)
+    fprintf(stderr, "[ppu] stale mosaic table: sx=%d size=%d cell=%d -> 1\n",
+            sx, mosaic_size, (int)PpuMosaicAt(ppu, sx));
+  return 1;
+}
+
 /* Frame of the last OAM ring snapshot; see the note in ppu_runLine. Debug
  * instrumentation only -- it never affects rendering. */
 static int s_oam_snap_frame = -1;
@@ -1815,7 +1836,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
     int mosaic_size = PPU_mosaicSize(ppu);
-    int w = mosaic_size - (sx - PpuMosaicAt(ppu, sx));
+    int w = PpuMosaicRunLength(ppu, sx, mosaic_size);
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = WS_TILE(*tp, ws_sx);
@@ -2108,7 +2129,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu, PpuPixelPrioBufs *dstbuf, in
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
     int mosaic_size = PPU_mosaicSize(ppu);
-    int w = mosaic_size - (sx - PpuMosaicAt(ppu, sx));
+    int w = PpuMosaicRunLength(ppu, sx, mosaic_size);
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -2175,7 +2196,7 @@ static void PpuDrawBackground_mode7(Ppu *ppu, PpuPixelPrioBufs *dstbuf, uint y, 
     uint32 outside_value = PPU_m7largeField(ppu) ? 0x3ffff : 0xffffffff;
     bool char_fill = PPU_m7charFill(ppu);
     if (mosaic_enabled) {
-      int w = PPU_mosaicSize(ppu) - (x - PpuMosaicAt(ppu, x));
+      int w = PpuMosaicRunLength(ppu, x, PPU_mosaicSize(ppu));
       do {
         w = IntMin(w, dstz_end - dstz);
         if ((uint32)(xpos | ypos) > outside_value) {
