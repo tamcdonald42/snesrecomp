@@ -464,7 +464,12 @@ static uint32_t snes_advance_beam(Snes *snes, uint32_t clocks, bool check_irq) {
         if (h >= 1364u) {
           h = 0; v++; if (v >= 262u) v = 0;
           if (v == 225u) { snes->rdnmiPending = true; ppu_rasterFieldBoundary(); }
-          if (v == 0u) snes->rdnmiPending = false;
+          /* The NMI-pending latch is cleared by the CPU's $4210 read, not by
+           * the field wrap. A beam host delivers the NMI on reaching v=225,
+           * so clearing here (or letting the handler's own ack read clear it,
+           * below) leaves the main loop's "lda hRDNMI / bpl" poll spinning on
+           * a latch that was consumed before it could look. Final Fantasy VI
+           * deadlocked exactly that way at the end of its intro. */
         }
         snes->hPos = (uint16_t)h;
         snes->vPos = (uint16_t)v;
@@ -633,8 +638,11 @@ uint8_t snes_readReg(Snes* snes, uint16_t adr) {
       // before the next NMI fires. (SMW happens to discard the loaded
       // value, but a hardware-correct read-clear costs one store and
       // is the right contract for game #2.)
+      // The one exception is the read the handler itself takes to
+      // acknowledge the interrupt: that acks, but must leave the pending
+      // latch for a main-loop poll later in the same frame.
+      if (!snes->inNmi) snes->rdnmiPending = false;
       snes->inNmi = false;
-      snes->rdnmiPending = false;
       return val;
     }
     case 0x4211: {
