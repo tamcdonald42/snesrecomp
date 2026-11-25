@@ -503,7 +503,11 @@ static uint32_t snes_advance_beam(Snes *snes, uint32_t clocks, bool check_irq) {
       if (v == 225u) { snes->rdnmiPending = true; ppu_rasterFieldBoundary(); }
       if (v >= 262u) {
         v = 0;
-        snes->rdnmiPending = false;
+        /* Do NOT clear rdnmiPending at the field wrap. On hardware the
+         * $4210 NMI bit is set at the start of the next vblank and stays
+         * set until the CPU reads it; clearing here wiped a latch that a
+         * frame host sets at dispatch, so FF6's `lda $4210 / bpl` in
+         * play_song never saw it and the intro deadlocked. */
         if (check_irq && !snes->hdmaBeamOff)
           dma_initHdma(snes->dma);
         /* End of field. Armed the whole way round and nothing latched means
@@ -642,7 +646,12 @@ uint8_t snes_readReg(Snes* snes, uint16_t adr) {
       // acknowledge the interrupt: that acks, but must leave the pending
       // latch for a main-loop poll later in the same frame.
       if (!snes->inNmi) snes->rdnmiPending = false;
-      snes->inNmi = false;
+      /* inNmi is owned by the host frame driver, which sets it around the
+       * whole dispatch and clears it after the handler returns. Clearing it
+       * here ended the "inside the handler" window at the handler's FIRST
+       * read, so its second read (or any port-internal read) cleared the
+       * pending latch before the guest's main loop could observe it --
+       * FF6's play_song then spun on `lda $4210 / bpl` for ever. */
       return val;
     }
     case 0x4211: {

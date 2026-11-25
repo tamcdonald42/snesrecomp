@@ -148,6 +148,14 @@ void snes_beam_frame_driver_run_frame(void) {
   /* NMITIMEN gates NMI; nothing is delivered before reset has run, since
    * there is no instruction stream to interrupt yet. */
   if (!booting && g_snes->nmiEnabled) {
+    /* A frame host delivers the NMI here instead of walking the beam to
+     * V=225, so nothing ever sets the $4210 "NMI occurred" latch that
+     * snes_runClocks sets at the field wrap. A guest that polls
+     * `lda $4210 / bpl` -- FF6's play_song command does exactly that --
+     * then spins forever because the handler's own ack read consumed the
+     * only copy. Latch it before the dispatch: the handler's read leaves
+     * it (inNmi guard), the main loop's later read sees bit 7 and clears. */
+    g_snes->rdnmiPending = true; /* HLE frame host: latch for the poll */
     g_snes->inNmi = true;
     s_wai_halted = false;
     run_interrupt(nmi_vector(), frame_end);

@@ -90,6 +90,9 @@ void snes_generic_frame_driver_run_frame(void) {
      * sequence. Nothing is delivered on the very first frame either -- reset
      * has not run yet, so there is no instruction stream to interrupt. */
     if (!booting && g_snes->nmiEnabled) {
+        /* Frame host: latch the $4210 "NMI occurred" bit the beam walk would
+         * have set at the field wrap, so a guest polling it sees it. */
+        g_snes->rdnmiPending = true;
         g_snes->inNmi = true;
         run_interrupt(nmi_vector(), frame_end);
         g_snes->inNmi = false;
