@@ -68,6 +68,91 @@ static bool g_want_screenshot;
 static double g_screenshot_flash_start_time = -1.0;
 static const double kScreenshotFlashSeconds = 0.15;
 
+/* ── bezel layer ────────────────────────────────────────────────────────────
+ * Panels painted into the game's own framebuffer are 224 rows tall whatever the
+ * window size, so 64x224 art is blown up five times on a 1080p display and
+ * reads muddy. This draws the same art where the pixels actually are: uploaded
+ * once as a texture, drawn over the frame's margin strips at drawable
+ * resolution, after the frame and after any CRT shader.
+ *
+ * The presenter must not need to know what a "panel" is, so the contract is two
+ * pointers the game calls:
+ *   SnesOpenGLBezelImage  the art, uploaded once. NULL until this presenter is
+ *                         up, which is also the signal that the game may skip
+ *                         its own framebuffer painting.
+ *   SnesOpenGLBezelFrame  per frame: visible, and what fraction of the frame
+ *                         width each margin occupies (64/384 for FF6).
+ */
+void (*SnesOpenGLBezelImage)(const unsigned char *left, int left_w, int left_h,
+                             const unsigned char *right, int right_w,
+                             int right_h);
+void (*SnesOpenGLBezelFrame)(int visible, float margin_fraction);
+
+static unsigned int g_bezel_tex[2];
+static int g_bezel_visible_now;
+static float g_bezel_frac;
+
+static void UploadBezel(unsigned int *tex, const unsigned char *rgba, int w,
+                        int h) {
+  if (!rgba || w <= 0 || h <= 0) {
+    if (*tex) { glDeleteTextures(1, tex); *tex = 0; }
+    return;
+  }
+  if (!*tex) glGenTextures(1, tex);
+  glBindTexture(GL_TEXTURE_2D, *tex);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               rgba);
+  /* Art is a picture, not a pixel grid: smooth filtering is what makes a
+   * 224-pixel-wide strip look like art at 1080p instead of a mosaic. */
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+static void ApplyBezelImage(const unsigned char *left, int left_w, int left_h,
+                            const unsigned char *right, int right_w,
+                            int right_h) {
+  UploadBezel(&g_bezel_tex[0], left, left_w, left_h);
+  UploadBezel(&g_bezel_tex[1], right, right_w, right_h);
+  fprintf(stderr, "[gl] bezel art: left %dx%d, right %dx%d\n",
+          left ? left_w : 0, left ? left_h : 0, right ? right_w : 0,
+          right ? right_h : 0);
+}
+
+static void ApplyBezelFrame(int visible, float margin_fraction) {
+  g_bezel_visible_now = visible;
+  g_bezel_frac = margin_fraction;
+}
+
+static void DrawBezelLayer(const SnesDisplayViewport *vp) {
+  if (!g_bezel_visible_now) return;
+  if (!g_bezel_tex[0] && !g_bezel_tex[1]) return;
+  if (!(g_bezel_frac > 0.0f) || g_bezel_frac >= 0.5f) return;
+
+  int strip = (int)((float)vp->width * g_bezel_frac + 0.5f);
+  if (strip <= 0 || strip >= vp->width / 2) return;
+
+  glDisable(GL_BLEND);
+  glUseProgram(g_program);
+  glUniform1i(glGetUniformLocation(g_program, "texture1"), 0);
+  glActiveTexture(GL_TEXTURE0);
+  glBindVertexArray(g_VAO);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  if (g_bezel_tex[0]) {
+    glViewport(vp->x, vp->y, strip, vp->height);
+    glBindTexture(GL_TEXTURE_2D, g_bezel_tex[0]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
+  if (g_bezel_tex[1]) {
+    glViewport(vp->x + vp->width - strip, vp->y, strip, vp->height);
+    glBindTexture(GL_TEXTURE_2D, g_bezel_tex[1]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
+}
+
 extern void MkDir(const char *s);
 
 /* -1 = decide from config at init. A host that paces presentation itself
@@ -279,6 +364,8 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
   }
 
   LoadShaderFromConfig();
+  SnesOpenGLBezelImage = ApplyBezelImage;
+  SnesOpenGLBezelFrame = ApplyBezelFrame;
 
   return true;
 }
@@ -292,7 +379,18 @@ static void OpenGLRenderer_Reconfigure(void) {
   LoadShaderFromConfig();
 }
 
+static void RemoveBezelHooks(void) {
+  SnesOpenGLBezelImage = NULL;
+  SnesOpenGLBezelFrame = NULL;
+  for (int i = 0; i < 2; i++) {
+    if (g_bezel_tex[i]) glDeleteTextures(1, &g_bezel_tex[i]);
+    g_bezel_tex[i] = 0;
+  }
+  g_bezel_visible_now = 0;
+}
+
 static void OpenGLRenderer_Destroy(void) {
+  RemoveBezelHooks();
   SnesHdGpuDestroy(g_hd_gpu); g_hd_gpu = NULL; g_hd_tried = false;
   if (g_glsl_shader) GlslShader_Destroy(g_glsl_shader);
   g_glsl_shader = NULL; g_shader_resolved = false;
@@ -464,6 +562,9 @@ static void OpenGLRenderer_EndDraw(void) {
     GlslShader_Render(g_glsl_shader, &image, viewport.x, viewport.y,
                       viewport.width, viewport.height);
   }
+
+  DrawBezelLayer(&viewport);
+  glViewport(0, 0, drawable_width, drawable_height);
 
   if (g_want_screenshot) {
     g_want_screenshot = false;

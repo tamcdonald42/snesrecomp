@@ -1510,6 +1510,25 @@ static void DrawPpuFrameWithPerf(void) {
 
   profile_start = ProfileStart();
   RtlDrawPpuFrame(pixel_buffer, pitch, g_ppu_render_flags);
+
+  /* Diagnostic: SNESRECOMP_SCREENSHOT_AT=<frame> captures one screenshot of the
+   * fully composited GL frame -- bezel layer, shader and all -- once that frame
+   * has been run. Headless verification needs it because the presented image is
+   * not what a frame dump holds. */
+  {
+    static int shot_at = -2;
+    if (shot_at == -2) {
+      const char *v = getenv("SNESRECOMP_SCREENSHOT_AT");
+      shot_at = (v && *v) ? atoi(v) : -1;
+    }
+    if (shot_at >= 0) {
+      extern int snes_frame_counter;
+      if (snes_frame_counter >= shot_at) {
+        shot_at = -1;
+        OpenGLRenderer_RequestScreenshot();
+      }
+    }
+  }
 #if defined(SNESRECOMP_HOST_HAS_BLEND)
   /* The shared blend keeps the UNBLENDED frame, so the mix never feeds back
    * on itself, and the PPU's own renderBuffer stays pure for thumbnails.

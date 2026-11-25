@@ -7,6 +7,18 @@
 
 #ifdef __cplusplus
 extern "C" {
+
+/* Bezel layer for the GL presenter. The game uploads its art once and
+ * then tells the presenter, per frame, whether to draw it and how much of
+ * the frame width each margin takes (0.1667 = 64 of 384). Both are NULL
+ * until a GL presenter exists, so a caller can test them to find out
+ * whether the fast path is available at all. */
+extern void (*SnesOpenGLBezelImage)(const unsigned char *left,
+                                    int left_w, int left_h,
+                                    const unsigned char *right,
+                                    int right_w, int right_h);
+extern void (*SnesOpenGLBezelFrame)(int visible, float margin_fraction);
+
 #endif
 
 /* Force the swap interval instead of deriving it from config.

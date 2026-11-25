@@ -58,4 +58,12 @@ enum { kWsExtraMax = 272 };
 void RtlWidescreenPresent(uint8_t *dst, size_t pitch, const uint8_t *src,
                           int snes_width, int snes_height);
 
+// Optional pass that runs at the end of RtlWidescreenPresent, once the frame
+// is in `dst` and before it is captured or uploaded: the last chance to draw
+// on the image the player will actually see. NULL by default; a title sets it
+// once during configuration. A pointer rather than a weak symbol because MSVC
+// has no equivalent of __attribute__((weak)) for functions.
+extern void (*RtlWidescreenPostPresent)(uint8_t *dst, size_t pitch,
+                                       int snes_width, int snes_height);
+
 #endif  // SNESRECOMP_WIDESCREEN_H
