@@ -254,16 +254,37 @@ void snes_beam_frame_driver_draw_ppu_frame_observed(
   snes_set_hdma_beam_enabled(g_snes, false);
   ppu_rasterRenderBegin(g_ppu);
   dma_initHdma(g_snes->dma);
-  /* Hardware's V=0 init also performs each channel's first transfer before
-   * any visible pixel. */
-  dma_primeHdmaFirstLine(g_snes->dma);
+  /* Hardware's V=0 init performs each channel's first transfer before any
+   * visible pixel, and that transfer CONSUMES the first table entry: entry 0
+   * owns line 0, entry 1 line 1. Priming without consuming (dma_primeHdma
+   * FirstLine, which saves and restores the channel) hands the first entry to
+   * both line 0 and line 1, so a per-line effect that starts at the top of
+   * the frame runs one line longer than the cartridge's -- FF6's intro bar
+   * measured rows 0..7 against the cartridge's 0..6. */
+  dma_doHdma(g_snes->dma);
   for (line = 1; line <= 224; line++) {
     uint8_t hdmaen;
     /* A split is written in H-blank after its line is drawn, so the previous
      * line's entries take effect on this one. */
     ppu_rasterApplyLine(g_ppu, line - 1);
-    if (ppu_rasterTakeHdmaen(&hdmaen))
+    if (ppu_rasterTakeHdmaen(&hdmaen)) {
       dma_startDma(g_snes->dma, hdmaen, true);
+      /* FF6 rewrites $420C every frame -- off for the tail of the CPU work,
+       * then on again -- and that re-enable is queued into this loop, so it
+       * lands on the field's first line. Charging its table load to the
+       * first H-blank defers every per-line write by two lines: the intro's
+       * letterbox drew rows 2..8 black where the cartridge draws 0..6, with
+       * two rows of sky above it that the original does not have (measured
+       * against bsnes at frame 8800). Hardware's V=0 init reads the header
+       * and performs the first transfer before any visible pixel, so do the
+       * same while the field has not drawn a line yet. A mid-frame HDMAEN
+       * change keeps the deferred path and its measured two-line cost
+       * (Gundam Wing: enabled at line 21, first $212C write at line 23). */
+      if (line == 1) {
+        dma_initHdma(g_snes->dma);
+        dma_doHdma(g_snes->dma);
+      }
+    }
     ppu_runLine(g_ppu, line);
     if (observer)
       observer(g_ppu, (unsigned)line, context);
