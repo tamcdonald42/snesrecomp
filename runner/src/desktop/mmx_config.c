@@ -91,6 +91,12 @@ void ConfigUseStateMenuDefaults(void) {
 void ConfigUseInGameLauncherDefaults(void) {
   kDefaultKbdControls[kKeys_OpenLauncher] = C(SDLK_l);
 }
+/* Print Screen does nothing else in this host, and without a binding there is
+ * no way to capture the presented frame at all -- which for the OpenGL
+ * backend is the only pixel-exact evidence of what the compositor drew. */
+void ConfigUseScreenshotDefault(void) {
+  kDefaultKbdControls[kKeys_Screenshot] = _(SDLK_PRINTSCREEN);
+}
 #undef _
 #undef A
 #undef C

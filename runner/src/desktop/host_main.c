@@ -3508,6 +3508,7 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
   }
   if (game->state_menu_hotkeys) ConfigUseStateMenuDefaults();
   if (game->in_game_launcher) ConfigUseInGameLauncherDefaults();
+  ConfigUseScreenshotDefault();
   /* Before parsing: default [GamepadMap] rows exist for each routed seat. */
   ConfigSetPadSeats(HostConfiguredSeats());
   ParseConfigFile(config_file);
