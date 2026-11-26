@@ -126,13 +126,18 @@ static void ApplyBezelFrame(int visible, float margin_fraction) {
   g_bezel_frac = margin_fraction;
 }
 
-static void DrawBezelLayer(const SnesDisplayViewport *vp) {
+static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
+                           int drawable_h) {
   if (!g_bezel_visible_now) return;
   if (!g_bezel_tex[0] && !g_bezel_tex[1]) return;
   if (!(g_bezel_frac > 0.0f) || g_bezel_frac >= 0.5f) return;
 
   int strip = (int)((float)vp->width * g_bezel_frac + 0.5f);
   if (strip <= 0 || strip >= vp->width / 2) return;
+
+  const int picture_x0 = vp->x + strip;
+  const int picture_x1 = vp->x + vp->width - strip;
+  if (picture_x0 <= 0 || picture_x1 >= drawable_w) return;
 
   glDisable(GL_BLEND);
   glUseProgram(g_program);
@@ -141,13 +146,17 @@ static void DrawBezelLayer(const SnesDisplayViewport *vp) {
   glBindVertexArray(g_VAO);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  /* Art runs from the window edge to the picture edge, over the full drawable
+   * height. Filling only the frame's own margin strips leaves whatever band the
+   * presentation aspect adds, and that band is what a player reads as a black
+   * bar above the game. */
   if (g_bezel_tex[0]) {
-    glViewport(vp->x, vp->y, strip, vp->height);
+    glViewport(0, 0, picture_x0, drawable_h);
     glBindTexture(GL_TEXTURE_2D, g_bezel_tex[0]);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
   if (g_bezel_tex[1]) {
-    glViewport(vp->x + vp->width - strip, vp->y, strip, vp->height);
+    glViewport(picture_x1, 0, drawable_w - picture_x1, drawable_h);
     glBindTexture(GL_TEXTURE_2D, g_bezel_tex[1]);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
@@ -517,7 +526,7 @@ static void OpenGLRenderer_EndDraw(void) {
   SnesDisplayViewport viewport;
   SnesDisplayAspect_ComputeViewport(
       g_draw_width, g_draw_height, drawable_width, drawable_height,
-      SnesDisplayAspect_Clamp(g_config.display_aspect),
+      SnesDisplayAspect_ForFrame(g_draw_width, g_config.display_aspect),
       g_config.ignore_aspect_ratio, false, &viewport);
   if (g_compute_viewport)
     g_compute_viewport(g_draw_width, g_draw_height, drawable_width, drawable_height, &viewport);
@@ -563,7 +572,7 @@ static void OpenGLRenderer_EndDraw(void) {
                       viewport.width, viewport.height);
   }
 
-  DrawBezelLayer(&viewport);
+  DrawBezelLayer(&viewport, drawable_width, drawable_height);
   glViewport(0, 0, drawable_width, drawable_height);
 
   if (g_want_screenshot) {

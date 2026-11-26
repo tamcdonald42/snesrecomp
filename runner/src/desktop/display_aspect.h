@@ -50,6 +50,19 @@ static inline bool SnesDisplayAspect_Parse(const char *text, uint8_t *value) {
 }
 /* Horizontal:vertical pixel aspect. A 256x224 frame therefore presents as
  * 4:3, 8:7, or 1:1 respectively. */
+/* A frame wider than 256 comes from a port that declares native widescreen.
+ * The stored setting is a *pixel* aspect defined for the 256-wide frame, where
+ * 7:6 is 4:3; applied to 384x224 that same 7:6 yields a 2:1 picture, wider than
+ * any screen, so the presenter letterboxes it top and bottom and the picture is
+ * stretched by a sixth -- the black bar a player reports as a bezel bug. Square
+ * pixels are the only honest presentation of a wide frame; the player's choice
+ * still governs the 256-wide one. */
+static inline SnesDisplayAspect SnesDisplayAspect_ForFrame(int frame_width,
+                                                            int configured) {
+  if (frame_width > 256) return kSnesDisplayAspect_SquarePixels8x7;
+  return SnesDisplayAspect_Clamp(configured);
+}
+
 static inline void SnesDisplayAspect_GetPixelAspect(
     SnesDisplayAspect aspect, int *numerator, int *denominator) {
   static const uint8_t kNumerators[kSnesDisplayAspect_Count] = {7, 1, 7};

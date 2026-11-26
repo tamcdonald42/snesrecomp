@@ -2493,7 +2493,7 @@ static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pi
   SdlRenderer_GetOutputSize(&output_width, &output_height);
   SnesDisplayViewport viewport;
   SnesDisplayAspect_ComputeViewport(width, height, output_width, output_height,
-                                    SnesDisplayAspect_Clamp(g_config.display_aspect),
+                                    SnesDisplayAspect_ForFrame(width, g_config.display_aspect),
                                     g_config.ignore_aspect_ratio, false, &viewport);
   if (g_game->compute_viewport)
     g_game->compute_viewport(width, height, output_width, output_height, &viewport);
