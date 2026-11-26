@@ -148,25 +148,30 @@ static void ApplyBezelFrame(int visible, float margin_fraction) {
  *     first attempt at this.
  * Cover crops, and a crop of a decorative panel is invisible; a crop of the
  * PICTURE would not be, which is why the picture is never touched. */
-static void DrawBezelBand(int x, int w, int drawable_h, int side) {
-  if (w <= 0 || !g_bezel_tex[side]) return;
+static void DrawBezelBand(int x, int w, int y0, int h0, int side) {
+  if (w <= 0 || h0 <= 0 || !g_bezel_tex[side]) return;
   const int tw = g_bezel_tex_w[side], th = g_bezel_tex_h[side];
   if (tw <= 0 || th <= 0) {
     glBindTexture(GL_TEXTURE_2D, g_bezel_tex[side]);
-    glViewport(x, 0, w, drawable_h);
+    glViewport(x, y0, w, h0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     return;
   }
+  /* Cover the PICTURE's height, not the window's. A 4:3 scene is shorter
+   * than the window, and covering the window made the art taller than the
+   * band it sits beside -- so it was scaled up and clipped horizontally,
+   * which the player sees as the panel being cropped all the way round in
+   * battle while looking right everywhere else. */
   double sw = (double)w / (double)tw;
-  double sh = (double)drawable_h / (double)th;
+  double sh = (double)h0 / (double)th;
   const double sc = sw > sh ? sw : sh;
   const int aw = (int)((double)tw * sc + 0.5);
   const int ah = (int)((double)th * sc + 0.5);
   const int ax = x + (w - aw) / 2;
-  const int ay = (drawable_h - ah) / 2;
+  const int ay = y0 + (h0 - ah) / 2;
 
   glEnable(GL_SCISSOR_TEST);
-  glScissor(x, 0, w, drawable_h);
+  glScissor(x, y0, w, h0);
   glBindTexture(GL_TEXTURE_2D, g_bezel_tex[side]);
   SetTint(1.0f, 1.0f, 1.0f, 1.0f);
   glViewport(ax, ay, aw, ah);
@@ -209,8 +214,32 @@ static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
    * the band is much wider than a 64:224 panel, so a single stretched quad
    * distorts the portrait. The dim copy is what stops the leftover band from
    * reading as a black pillarbox. */
-  DrawBezelBand(0, picture_x0, drawable_h, 0);
-  DrawBezelBand(picture_x1, drawable_w - picture_x1, drawable_h, 1);
+  {
+    /* Geometry on disk, not in a console the player would have to copy.
+     * Guessing at this cost three builds and got the art cropped: the bands
+     * the code computes and the space the picture actually leaves are not the
+     * same numbers on every window size, and only the real ones settle it. */
+    GLint fb[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_VIEWPORT, fb);
+    static char last[512];
+    char buf[512];
+    snprintf(buf, sizeof buf,
+        "vp=%d,%d %dx%d drawable=%dx%d frac=%.4f strip=%d pic=%d..%d "
+        "artL=%dx%d artR=%dx%d glvp=%d,%d %dx%d frame=%dx%d\n",
+        vp->x, vp->y, vp->width, vp->height, drawable_w, drawable_h,
+        (double)g_bezel_frac, strip, picture_x0, picture_x1,
+        g_bezel_tex_w[0], g_bezel_tex_h[0], g_bezel_tex_w[1], g_bezel_tex_h[1],
+        fb[0], fb[1], fb[2], fb[3], g_draw_width, g_draw_height);
+    if (strcmp(buf, last) != 0) {
+      snprintf(last, sizeof last, "%s", buf);
+      fprintf(stderr, "[gl] %s", buf);
+      FILE *gf = fopen("qol_geom.txt", "w");
+      if (gf) { fputs(buf, gf); fclose(gf); }
+    }
+  }
+
+  DrawBezelBand(0, picture_x0, vp->y, vp->height, 0);
+  DrawBezelBand(picture_x1, drawable_w - picture_x1, vp->y, vp->height, 1);
 }
 
 extern void MkDir(const char *s);
