@@ -89,15 +89,20 @@ void (*SnesOpenGLBezelImage)(const unsigned char *left, int left_w, int left_h,
 void (*SnesOpenGLBezelFrame)(int visible, float margin_fraction);
 
 static unsigned int g_bezel_tex[2];
+static int g_bezel_tex_w[2], g_bezel_tex_h[2];   /* art's own pixel size */
 static int g_bezel_visible_now;
 static float g_bezel_frac;
 
 static void UploadBezel(unsigned int *tex, const unsigned char *rgba, int w,
                         int h) {
+  int *slot_w = (tex == &g_bezel_tex[0]) ? &g_bezel_tex_w[0] : &g_bezel_tex_w[1];
+  int *slot_h = (tex == &g_bezel_tex[0]) ? &g_bezel_tex_h[0] : &g_bezel_tex_h[1];
   if (!rgba || w <= 0 || h <= 0) {
     if (*tex) { glDeleteTextures(1, tex); *tex = 0; }
+    *slot_w = *slot_h = 0;
     return;
   }
+  *slot_w = w; *slot_h = h;
   if (!*tex) glGenTextures(1, tex);
   glBindTexture(GL_TEXTURE_2D, *tex);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -121,9 +126,41 @@ static void ApplyBezelImage(const unsigned char *left, int left_w, int left_h,
           right ? right_h : 0);
 }
 
+static int g_tint_loc = -1;
+static void SetTint(float r, float g, float b, float a) {
+  if (g_tint_loc < 0)
+    g_tint_loc = glGetUniformLocation(g_program, "tint");
+  if (g_tint_loc >= 0) glUniform4f(g_tint_loc, r, g, b, a);
+}
+
 static void ApplyBezelFrame(int visible, float margin_fraction) {
   g_bezel_visible_now = visible;
   g_bezel_frac = margin_fraction;
+}
+
+/* One side band: dim stretched backing, then the art centred at its own
+ * aspect inside the band. Never distorts the art, never leaves bare black. */
+static void DrawBezelBand(int x, int w, int drawable_h, int side) {
+  if (w <= 0 || !g_bezel_tex[side]) return;
+  glBindTexture(GL_TEXTURE_2D, g_bezel_tex[side]);
+  SetTint(0.32f, 0.32f, 0.36f, 1.0f);
+  glViewport(x, 0, w, drawable_h);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  SetTint(1.0f, 1.0f, 1.0f, 1.0f);
+
+  const int tw = g_bezel_tex_w[side], th = g_bezel_tex_h[side];
+  if (tw <= 0 || th <= 0) return;
+  int ah = drawable_h;
+  int aw = (int)((double)ah * (double)tw / (double)th + 0.5);
+  if (aw > w) {
+    aw = w;
+    ah = (int)((double)aw * (double)th / (double)tw + 0.5);
+  }
+  if (aw <= 0 || ah <= 0) return;
+  const int ax = x + (w - aw) / 2;
+  const int ay = (drawable_h - ah) / 2;
+  glViewport(ax, ay, aw, ah);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
@@ -151,20 +188,19 @@ static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
   glBindVertexArray(g_VAO);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  SetTint(1.0f, 1.0f, 1.0f, 1.0f);
   /* Art runs from the window edge to the picture edge, over the full drawable
    * height. Filling only the frame's own margin strips leaves whatever band the
    * presentation aspect adds, and that band is what a player reads as a black
    * bar above the game. */
-  if (g_bezel_tex[0] && picture_x0 > 0) {
-    glViewport(0, 0, picture_x0, drawable_h);
-    glBindTexture(GL_TEXTURE_2D, g_bezel_tex[0]);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  }
-  if (g_bezel_tex[1] && picture_x1 < drawable_w) {
-    glViewport(picture_x1, 0, drawable_w - picture_x1, drawable_h);
-    glBindTexture(GL_TEXTURE_2D, g_bezel_tex[1]);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  }
+  /* Each band, in two passes: the art at its OWN aspect ratio, then a dim wide
+   * copy filling whatever the art does not cover. Drawing the art straight
+   * across the band is what made the panels look squashed on a 4:3 battle --
+   * the band is much wider than a 64:224 panel, so a single stretched quad
+   * distorts the portrait. The dim copy is what stops the leftover band from
+   * reading as a black pillarbox. */
+  DrawBezelBand(0, picture_x0, drawable_h, 0);
+  DrawBezelBand(picture_x1, drawable_w - picture_x1, drawable_h, 1);
 }
 
 extern void MkDir(const char *s);
@@ -325,8 +361,12 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
   in vec2 TexCoord;
   // texture samplers
   uniform sampler2D texture1;
+  /* Multiply tint. White for the game frame and for bezel art; dimmed for the
+   * backdrop copy that fills the rest of a side band when the art does not
+   * cover it. A uniform the caller must set: see SetTint. */
+  uniform vec4 tint;
   void main(void) {
-    FragColor = texture(texture1, TexCoord);
+    FragColor = texture(texture1, TexCoord) * tint;
   }
 );
 
@@ -567,6 +607,7 @@ static void OpenGLRenderer_EndDraw(void) {
   if (g_glsl_shader == NULL) {
     glViewport(viewport.x, viewport.y, viewport.width, viewport.height);
     glUseProgram(g_program);
+    SetTint(1.0f, 1.0f, 1.0f, 1.0f);
     int filter = g_config.linear_filtering ? GL_LINEAR : GL_NEAREST;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
