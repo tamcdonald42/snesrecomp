@@ -1718,6 +1718,11 @@ static void DrawPpuFrameWithPerf(void) {
 
 /* Seat-0 input word the overlays navigate with — the same sources the guest
  * gets, minus the script (an overlay is a human facility). */
+uint32 snesrecomp_pad_held_buttons(int seat) {
+  if (seat < 0 || seat >= kSnesHostPadSeats) return 0;
+  return g_gamepad[seat].modifiers;
+}
+
 static uint32 OverlayNavInputs(void) {
   return g_input_state | g_pad_buttons | g_gamepad[0].axis_buttons;
 }

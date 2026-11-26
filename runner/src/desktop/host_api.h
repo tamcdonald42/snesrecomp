@@ -34,6 +34,13 @@ extern bool g_config_dirty;
  * change a window, write settings or perform application actions. */
 bool snesrecomp_host_frame_is_live(void);
 
+/* Raw SDL controller buttons currently held on a seat, bit (1u << button) for
+ * SDL_CONTROLLER_BUTTON_* — the same mask the input map uses for modifiers.
+ * Exists for quality-of-life chords the game's own mapping cannot carry:
+ * stick clicks (L3/R3) and the triggers are not SNES buttons, so a host-side
+ * feature has no other way to read them. Zero when no pad is seated there. */
+uint32 snesrecomp_pad_held_buttons(int seat);
+
 /* Request a normal application shutdown at the host's next event poll.
  * Returns to the caller; configuration, SRAM and host resources follow the
  * same shutdown path as closing the window. Call after SDL initialization.
