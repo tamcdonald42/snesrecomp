@@ -138,31 +138,41 @@ static void ApplyBezelFrame(int visible, float margin_fraction) {
   g_bezel_frac = margin_fraction;
 }
 
-/* One side band: dim stretched backing, then the art centred at its own
- * aspect inside the band. Never distorts the art, never leaves bare black. */
+/* One side band, filled by the art at a uniform scale ("cover") and clipped to
+ * the band. Nothing else works for arbitrary window sizes:
+ *   - stretching to the band distorts a portrait panel (the squashed battle
+ *     bezel the player saw);
+ *   - fitting inside the band leaves bare pixels (the black gap);
+ *   - a dimmed stretched copy behind a fitted one reads as two panels, a thin
+ *     crisp one on a wide dark one -- exactly how the intro looked after the
+ *     first attempt at this.
+ * Cover crops, and a crop of a decorative panel is invisible; a crop of the
+ * PICTURE would not be, which is why the picture is never touched. */
 static void DrawBezelBand(int x, int w, int drawable_h, int side) {
   if (w <= 0 || !g_bezel_tex[side]) return;
-  glBindTexture(GL_TEXTURE_2D, g_bezel_tex[side]);
-  SetTint(0.32f, 0.32f, 0.36f, 1.0f);
-  glViewport(x, 0, w, drawable_h);
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  SetTint(1.0f, 1.0f, 1.0f, 1.0f);
-
   const int tw = g_bezel_tex_w[side], th = g_bezel_tex_h[side];
-  if (tw <= 0 || th <= 0) return;
-  int ah = drawable_h;
-  int aw = (int)((double)ah * (double)tw / (double)th + 0.5);
-  if (aw > w) {
-    aw = w;
-    ah = (int)((double)aw * (double)th / (double)tw + 0.5);
+  if (tw <= 0 || th <= 0) {
+    glBindTexture(GL_TEXTURE_2D, g_bezel_tex[side]);
+    glViewport(x, 0, w, drawable_h);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    return;
   }
-  if (aw <= 0 || ah <= 0) return;
+  double sw = (double)w / (double)tw;
+  double sh = (double)drawable_h / (double)th;
+  const double sc = sw > sh ? sw : sh;
+  const int aw = (int)((double)tw * sc + 0.5);
+  const int ah = (int)((double)th * sc + 0.5);
   const int ax = x + (w - aw) / 2;
   const int ay = (drawable_h - ah) / 2;
+
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(x, 0, w, drawable_h);
+  glBindTexture(GL_TEXTURE_2D, g_bezel_tex[side]);
+  SetTint(1.0f, 1.0f, 1.0f, 1.0f);
   glViewport(ax, ay, aw, ah);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glDisable(GL_SCISSOR_TEST);
 }
-
 static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
                            int drawable_h) {
   if (!g_bezel_visible_now) return;
