@@ -130,14 +130,19 @@ static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
                            int drawable_h) {
   if (!g_bezel_visible_now) return;
   if (!g_bezel_tex[0] && !g_bezel_tex[1]) return;
-  if (!(g_bezel_frac > 0.0f) || g_bezel_frac >= 0.5f) return;
+  /* A margin of 0 is legal: the picture is the whole frame (a 4:3 scene
+   * presented pillarboxed), so there is no inner strip to cover and the art
+   * still fills the band from the window edge to the picture edge. Refusing
+   * it left that band black and made the panels disappear in every battle. */
+  if (g_bezel_frac < 0.0f || g_bezel_frac >= 0.5f) return;
 
   int strip = (int)((float)vp->width * g_bezel_frac + 0.5f);
-  if (strip <= 0 || strip >= vp->width / 2) return;
+  if (strip < 0) strip = 0;
+  if (strip >= vp->width / 2) return;
 
   const int picture_x0 = vp->x + strip;
   const int picture_x1 = vp->x + vp->width - strip;
-  if (picture_x0 <= 0 || picture_x1 >= drawable_w) return;
+  if (picture_x0 <= 0 && picture_x1 >= drawable_w) return;
 
   glDisable(GL_BLEND);
   glUseProgram(g_program);
@@ -150,12 +155,12 @@ static void DrawBezelLayer(const SnesDisplayViewport *vp, int drawable_w,
    * height. Filling only the frame's own margin strips leaves whatever band the
    * presentation aspect adds, and that band is what a player reads as a black
    * bar above the game. */
-  if (g_bezel_tex[0]) {
+  if (g_bezel_tex[0] && picture_x0 > 0) {
     glViewport(0, 0, picture_x0, drawable_h);
     glBindTexture(GL_TEXTURE_2D, g_bezel_tex[0]);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
-  if (g_bezel_tex[1]) {
+  if (g_bezel_tex[1] && picture_x1 < drawable_w) {
     glViewport(picture_x1, 0, drawable_w - picture_x1, drawable_h);
     glBindTexture(GL_TEXTURE_2D, g_bezel_tex[1]);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
