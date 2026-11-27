@@ -506,30 +506,13 @@ static double MonotonicSeconds(void) {
   return (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
 }
 
-static void SaveScreenshotBmp(int width, int height) {
+static void SaveBmpTo(const char *path, int width, int height, bool flash) {
   size_t pixel_size = (size_t)width * (size_t)height * 4;
   uint8 *pixels = (uint8 *)malloc(pixel_size);
   if (!pixels)
     return;
 
   glReadPixels(0, 0, width, height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
-
-  MkDir("screenshots");
-
-  time_t t = time(NULL);
-  struct tm tm_snapshot;
-  struct tm *local = localtime(&t);
-  if (local)
-    tm_snapshot = *local;
-  else
-    memset(&tm_snapshot, 0, sizeof(tm_snapshot));
-
-  char path[256];
-  snprintf(path, sizeof(path),
-           "screenshots/screenshot_%04d%02d%02d_%02d%02d%02d.bmp",
-           tm_snapshot.tm_year + 1900, tm_snapshot.tm_mon + 1,
-           tm_snapshot.tm_mday, tm_snapshot.tm_hour, tm_snapshot.tm_min,
-           tm_snapshot.tm_sec);
 
   FILE *f = fopen(path, "wb");
   if (f) {
@@ -561,12 +544,28 @@ static void SaveScreenshotBmp(int width, int height) {
     fwrite(pixels, 1, pixel_size, f);
     fclose(f);
     printf("Screenshot saved: %s\n", path);
-    g_screenshot_flash_start_time = MonotonicSeconds();
+    if (flash) g_screenshot_flash_start_time = MonotonicSeconds();
   } else {
     fprintf(stderr, "Screenshot: couldn't open '%s' for writing\n", path);
   }
 
   free(pixels);
+}
+
+static void SaveScreenshotBmp(int width, int height) {
+  MkDir("screenshots");
+  time_t t = time(NULL);
+  struct tm tm_snapshot;
+  struct tm *local = localtime(&t);
+  if (local) tm_snapshot = *local;
+  else memset(&tm_snapshot, 0, sizeof(tm_snapshot));
+  char path[256];
+  snprintf(path, sizeof(path),
+           "screenshots/screenshot_%04d%02d%02d_%02d%02d%02d.bmp",
+           tm_snapshot.tm_year + 1900, tm_snapshot.tm_mon + 1,
+           tm_snapshot.tm_mday, tm_snapshot.tm_hour, tm_snapshot.tm_min,
+           tm_snapshot.tm_sec);
+  SaveBmpTo(path, width, height, true);
 }
 
 static bool DrawScreenshotFlash(double elapsed_seconds) {
@@ -659,6 +658,35 @@ static void OpenGLRenderer_EndDraw(void) {
 
   DrawBezelLayer(&viewport, drawable_width, drawable_height);
   glViewport(0, 0, drawable_width, drawable_height);
+
+  /* SNESRECOMP_GLSHOT_DIR=<dir> [SNESRECOMP_GLSHOT_SECS=<n>]: write the
+   * composed frame every n seconds. The composed frame only exists here --
+   * after the bezel pass, before the swap -- so this is the only pixel-exact
+   * record of what the player sees, and unlike a hotkey it cannot be
+   * swallowed by a streaming client. */
+  {
+    static const char *dir = NULL;
+    static int every = 5;
+    if (!dir) {
+      dir = getenv("SNESRECOMP_GLSHOT_DIR");
+      if (!dir) dir = "";
+      const char *v = getenv("SNESRECOMP_GLSHOT_SECS");
+      if (v && atoi(v) > 0) every = atoi(v);
+      if (dir[0]) MkDir(dir);
+    }
+    if (dir[0]) {
+      static double next_shot = 0.0;
+      static int n = 0;
+      const double now = MonotonicSeconds();
+      if (next_shot == 0.0) next_shot = now + 3.0;
+      if (now >= next_shot && n < 40) {
+        next_shot = now + (double)every;
+        char path[320];
+        snprintf(path, sizeof(path), "%s\\gl_%04d.bmp", dir, ++n);
+        SaveBmpTo(path, drawable_width, drawable_height, false);
+      }
+    }
+  }
 
   if (g_want_screenshot) {
     g_want_screenshot = false;
