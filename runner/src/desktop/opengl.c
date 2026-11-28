@@ -162,20 +162,6 @@ static void DrawBezelBand(int x, int w, int y0, int h0, int drawable_h, int side
    * band it sits beside -- so it was scaled up and clipped horizontally,
    * which the player sees as the panel being cropped all the way round in
    * battle while looking right everywhere else. */
-  /* Which vertical extent needs the least crop of the art? A wide scene
-   * leaves the window nearly full height, so the art can run to the window's
-   * top and bottom edge -- and must, or the stripes above and below it read
-   * as a black frame around the panels. A 4:3 scene cannot: there the art
-   * matches the picture's height instead, so its stripes line up with the
-   * picture's own letterbox and look like framing rather than a gap. */
-  {
-    const double a_art  = (double)tw / (double)th;
-    const double a_full = (double)w / (double)drawable_h;
-    const double a_pic  = (double)w / (double)h0;
-    const double d_full = a_full > a_art ? a_full - a_art : a_art - a_full;
-    const double d_pic  = a_pic  > a_art ? a_pic  - a_art : a_art - a_pic;
-    if (d_full < d_pic) { y0 = 0; h0 = drawable_h; }
-  }
   double sw = (double)w / (double)tw;
   double sh = (double)h0 / (double)th;
   const double sc = sw > sh ? sw : sh;
